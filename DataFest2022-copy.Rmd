@@ -1,0 +1,284 @@
+---
+title: "DataFest2022"
+author: "Yao Yao"
+date: "4/30/2022"
+output: pdf_document
+---
+
+```{r}
+##install.packages("readr")
+library("readr")
+##install.packages("tidyverse")
+library("tidyverse")
+##install.packages("lme4")
+library("lme4")
+##install.packages("pander")
+library("pander")
+##install.packages("dplyr")
+library("dplyr")
+##install.packages("plyr")
+library("plyr")
+##install.packages("scales")
+library("scales")
+##install.packages("plotrix")
+
+# read in the data
+data_log <- read_csv("/Users/yaoyao/Downloads/logs.csv")
+data_S5_ori <- read_csv("/Users/yaoyao/Downloads/S5_scores_cleaned.csv")
+```
+
+```{r}
+# calculated the difference between the participants’ S5 mean scores in the 
+#first and last week
+# create a new variable called difference
+new_data_S5 = data_S5_ori %>% 
+  drop_na() %>%
+  group_by(player_id) %>% 
+  slice(c(1, n())) %>% 
+  mutate(difference=S5_mean[1]-S5_mean[2]) %>%
+  mutate(efficient_or_not=ifelse(difference>0,1,0)) %>% 
+  slice(-1) %>%
+  ungroup()
+```
+
+```{r}
+# subset the primary data which contains the participants with S5 mean score
+new_log <- subset(data_log, player_id %in% c(new_data_S5$player_id))
+new_S5 <- subset(new_data_S5, player_id %in% c(new_log$player_id))
+
+```
+
+```{r}
+#The gender of the selected players
+gender_data <- new_log %>%
+  select(player_id, avatar_gender, school) %>%
+  filter(avatar_gender != "NA") %>% 
+  group_by(player_id) %>% 
+  slice(n()) %>% 
+  ungroup()
+
+#The proportion of a player choose the object correctly 
+subset_log6_2 <- new_log %>%
+  group_by(player_id) %>% 
+  subset(event_id %in% c(205)) %>% 
+  select(c("row_id","player_id","session","event_id","object_first_time_unlocked")) %>%
+  mutate(total_t = sum(object_first_time_unlocked == "TRUE")) %>% 
+  mutate(total_f = sum(object_first_time_unlocked == "FALSE")) %>%
+  mutate(accuracy = (total_t/(total_t+total_f))) %>% 
+  slice(c(1)) %>% 
+  ungroup() %>% 
+  select(c("player_id","accuracy"))
+
+#How many times people click "Fact"
+##select player_id and event_id
+new_log_sub <- new_log %>%
+  select(player_id, event_id)
+## remain event 407 
+event_407 <- new_log_sub %>%
+  filter(event_id == '407') %>%
+  group_by(player_id)
+fact_click <- ddply(event_407, .(player_id), nrow)
+##select frequency column
+fact_click <- fact_click %>%
+  select(player_id, V1)
+##Transform numerical variable to categorical
+fact_click <- fact_click %>%
+  mutate(fact_click_range = case_when(V1 < 500 ~ "0~500", 
+                                      500 <= V1 & V1 < 1000 ~ "500~1000", 
+                                      1000 <= V1 & V1< 1500 ~ "1000~1500",
+                                      1500 <= V1 & V1< 2000 ~ "1500~2000", 
+                                      V1 > 2000 ~ "over 2000")) %>%
+  select(player_id, fact_click_range)
+ 
+
+
+#How many times player check the epilogue
+## remain event 703 
+event_703 <- new_log_sub %>%
+  filter(event_id == '703') %>%
+  group_by(player_id)
+click_epilogue <- ddply(event_703, .(player_id), nrow)
+
+#How many times player hits replay
+## remain event 1000 
+event_1000 <- new_log_sub %>%
+  filter(event_id == '1000') %>%
+  group_by(player_id)
+hits_replay <- ddply(event_1000, .(player_id), nrow)
+
+#Time between player ready for invitation to they choose response to invitation
+subset_log6_1 <- new_log %>%
+  group_by(player_id) %>% 
+  subset(event_id %in% c(906,909)) %>% 
+  slice(c(1, n())) %>%
+  mutate(difference_in_seconds=event_time_dbl[2]-event_time_dbl[1]) %>% 
+  ##Transform numerical variable to categorical
+  mutate(difference_in_seconds = case_when(difference_in_seconds < 10000 ~ "0~10000", 
+                                      10000 <= difference_in_seconds &difference_in_seconds < 20000 ~ "10000~20000", 
+                                      20000 <= difference_in_seconds & difference_in_seconds< 30000 ~ "20000~30000",
+                                      difference_in_seconds > 30000 ~ "over 30000")) %>% 
+  select(c("player_id", "difference_in_seconds")) %>%
+  slice(-1) %>%
+  ungroup()
+
+#The mean time of player to level up from 1 star to 3 star in each minigames
+new_1 <- new_log %>%
+  filter(event_id == 306) %>%
+  select(player_id, event_time_dbl, data_values) %>%
+  filter(!grepl('0,1,2|1,1,2|2,1,2|3,1,2|4,1,2|5,1,2|6,1,2|7,1,2|8,1,2',data_values)) %>%
+  select(player_id, event_time_dbl) %>% 
+  group_by(player_id) %>%
+  mutate(diff = (event_time_dbl - lag(event_time_dbl)))
+row_odd <- seq_len(nrow(new_1)) %% 2 
+new_1 <- new_1[row_odd == 0, ] %>%
+  mutate(level_up_mean_time = diff) %>% 
+  select(player_id, level_up_mean_time) 
+new_2 <- aggregate(level_up_mean_time ~ player_id, new_1, mean)
+new_2[sapply(new_2, is.numeric)] <- lapply(new_2[sapply(new_2, is.numeric)], round, 2)
+```
+
+```{r}
+#How many time play replay the minigame about refuse people
+event_515 <- new_log_sub %>%
+  filter(event_id == '515') %>%
+  group_by(player_id)
+refuse_game <- ddply(event_515, .(player_id), nrow)
+refuse_game <- merge(refuse_game, new_S5, all = TRUE) %>%
+  select(player_id, V1) 
+refuse_game[is.na(refuse_game)] <- 0
+names(refuse_game)[names(refuse_game) == 'V1'] <- 'refuse_game_replay'
+```
+
+```{r}
+# The final skill level of a player
+skill_l <- new_log %>%
+  filter(event_id == "200") %>%
+  select(player_id, skill_level_know, skill_level_me, 
+         skill_level_people, skill_level_priority, skill_level_refusal) %>%
+  group_by(player_id) %>%
+  slice(n()) 
+skill_l$skill_ll = rowSums(skill_l[,c("skill_level_know", "skill_level_me", 
+             "skill_level_people", "skill_level_priority", "skill_level_refusal")])
+col_list = c("skill_level_know", "skill_level_me", 
+             "skill_level_people", "skill_level_priority", "skill_level_refusal")
+skill_l <- skill_l %>%
+  mutate(skill_level = skill_ll) %>%
+  select(player_id, skill_level)
+```
+
+```{r}
+#How many times player check "change decision" button
+event_221 <- new_log_sub %>%
+  filter(event_id == '221') %>%
+  group_by(player_id)
+decision <- ddply(event_221, .(player_id), nrow)
+decision <- merge(decision, new_S5, all = TRUE) %>%
+  select(player_id, V1) 
+decision[is.na(decision)] <- 0
+names(decision)[names(decision) == 'V1'] <- 'decision_times'
+  
+```
+
+```{r}
+# calculate the completetion degree of the whole game
+prop_completed <- new_log %>%
+  filter(event_id == "703") %>%
+  select(player_id, data_values) %>%
+  group_by(player_id) %>%
+  slice(n())
+prop_completed$prop_played <- sub(".*,\\s*", "", prop_completed$data_values)
+prop_completed <- prop_completed %>%
+  select(player_id, prop_played)
+```
+
+```{r}
+# merge all the data file to play_log(the newest)
+S5_2 <- new_S5 %>%
+  select(player_id, efficient_or_not, difference)
+log_1 <- merge(gender_data, subset_log6_1, by = "player_id")
+log_2 <- merge(log_1, subset_log6_2, by = "player_id")
+log_3 <- merge(log_2, fact_click, by = "player_id")
+log_4 <- merge(log_3, click_epilogue, by = "player_id")
+log_5 <- merge(log_4, hits_replay, by = "player_id")
+log_6 <- merge(log_5, S5_2, by = "player_id")
+log_7 <- merge(log_6, refuse_game, by = "player_id")
+log_8 <- merge(log_7, decision, by = "player_id")
+log_9 <- merge(log_8, prop_completed, by = "player_id")
+player_log <- merge(log_9, skill_l, by = "player_id")
+names(player_log)[names(player_log) == 'V1.x'] <- 'click_epilogue'
+names(player_log)[names(player_log) == 'V1.y'] <- 'replay_times'
+player_log <- player_log %>% 
+  select(player_id, avatar_gender, fact_click_range, click_epilogue, replay_times, difference, refuse_game_replay, decision_times, skill_level)
+write_csv(player_log,"/Users/yaoyao/Downloads/player_log.csv" )
+```
+
+
+
+```{r}
+#build and summary our model
+model1 <- lmer(difference~avatar_gender+fact_click_range+click_epilogue+decision_times+(1|refuse_game_replay)+(1|replay_times)+skill_level, data = player_log)
+summary(model1)
+pander(confint(model1),caption="Confidence interval")
+```
+
+```{r}
+# Bar chart for clicking epilogue based on avatar gender
+plot2<-ggplot(data=player_log,aes(x=click_epilogue,y=difference,fill=avatar_gender))+
+  geom_bar(position="stack",stat="identity")+labs(title="Bar chart for clicking epilogue based on avatar gender",caption = "Figure 2")+
+  theme_minimal() + 
+  scale_fill_manual(values = c("#F6C5B5","#6B8FBD"))
+ggsave("images/2.png", width = 4, height = 3.5)
+```
+
+
+```{r}
+#Boxplot for each team on avatar gender vs S5 mean score difference
+plot4<-player_log %>%
+ggplot(aes(x = avatar_gender, y = difference,color = difference_in_seconds))+
+labs(title ="Boxplot for each team on avatar gender vs S5 mean score difference
+",caption = "Figure 4")+
+geom_boxplot()+
+scale_colour_brewer(palette="Dark2")
+ggsave("images/3.png",height = 6)
+```
+
+
+```{r, echo=FALSE}
+#How many times player click 'fact' - plot
+player_log %>% 
+  mutate(fact_click_range = factor(fact_click_range)) %>% 
+  ggplot(aes(x = fact_click_range, fill = fact_click_range)) + geom_bar() + scale_fill_brewer(direction = -1, palette = "Greens") + labs(title = "Figure 1: How many times player click 'fact'",x = "", y = "") + coord_flip()
+ggsave("images/4.png",height = 6)
+```
+
+```{r}
+#How many times the player want to make decisions in stacks - plot
+ggplot(player_log, aes(x = decision_times)) + geom_histogram(aes(y=..density..), colour = "#6E7B8B", fill = "#B0C4DE") +geom_density(col="Red") + labs(title = "Figure 1: How many times the player want to make decisions in stacks",x = "Number of Decisions made", y = "Density")
+ggsave("images/5.png")
+```
+
+```{r}
+# 3D Pie Chart of Avatar genders
+library(plotrix)
+female = sum(player_log$avatar_gender == "Female")
+male = sum(player_log$avatar_gender == "Male")
+
+pct <- c(female/(female+male), male/(female+male))
+dta <- c("Female (46%)", "Male (54%)" )
+pie3D(pct, mar = rep(1.75, 4),
+      col=c("orange", "yellow"),
+      labels = dta,
+      main="Pie Chart of Avatar genders",radius = 0.75,height = 0.1,theta = 0.85,shade = 0.6,explode = 0.2)
+ggsave("images/6.png",height = 6)
+```
+
+```{r}
+#Distribution of difference based on Gender - plot
+ggplot(player_log, aes(x = avatar_gender, y = difference)) +  # ggplot function
+  geom_boxplot() + labs(title = "Figure 1: Distribution of difference based on Gender",x = "Avatar Gender", y = "Difference")
+ggsave("images/7.png")
+```
+
+
+
+
